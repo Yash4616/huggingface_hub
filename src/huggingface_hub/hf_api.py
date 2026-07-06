@@ -37,10 +37,6 @@ import httpx
 from tqdm.auto import tqdm as base_tqdm
 from tqdm.contrib.concurrent import thread_map
 
-from huggingface_hub.utils._xet import (
-    reset_xet_connection_info_cache_for_repo,
-)
-
 from . import constants
 from ._buckets import (
     BucketFile,
@@ -2060,9 +2056,9 @@ class DatasetLeaderboardEntry:
             Name of the result file containing the evaluation data.
         verified (`bool`):
             Whether the result has been verified.
-        source (`dict[str, Any]`):
+        source (`dict[str, Any]`, *optional*):
             Information about the source of the evaluation result. Contains keys like
-            `"url"`, `"name"`, and `"isExternal"`.
+            `"url"`, `"name"`, and `"isExternal"`. Not all entries have a source.
         author (`User` or `Organization`):
             The model author, parsed based on the `"type"` field in the API response.
         pull_request (`int`, *optional*):
@@ -2076,7 +2072,7 @@ class DatasetLeaderboardEntry:
     value: float
     filename: str
     verified: bool
-    source: dict[str, Any]
+    source: dict[str, Any] | None
     author: User | Organization
     pull_request: int | None = None
     notes: str | None = None
@@ -2087,7 +2083,7 @@ class DatasetLeaderboardEntry:
         self.value = kwargs.pop("value")
         self.filename = kwargs.pop("filename")
         self.verified = kwargs.pop("verified")
-        self.source = kwargs.pop("source")
+        self.source = kwargs.pop("source", None)
         author_data = dict(kwargs.pop("author"))
         author_type = author_data.get("type")
         if author_type == "org":
@@ -3390,6 +3386,7 @@ class HfApi:
         self,
         repo_id: str,
         *,
+        base_model_only: bool | None = None,
         token: bool | str | None = None,
         timeout: float | None = None,
     ) -> list[DatasetLeaderboardEntry]:
@@ -3404,6 +3401,11 @@ class HfApi:
             repo_id (`str`):
                 A namespace (user or an organization) and a repo name separated
                 by a `/`. For example: `"allenai/olmOCR-bench"`.
+            base_model_only (`bool` or `None`, *optional*):
+                By default, the leaderboard only includes models that have no declared `base_model` relation
+                (i.e. canonical/root repos), matching the Hub's default leaderboard view. Fine-tuned or derivative
+                repos that declare a parent model are excluded. Pass `base_model_only=False` to disable this filter and
+                include every submitted result, regardless of whether the model declares a base model relation.
             token (`bool` or `str`, *optional*):
                 A valid user access token. Defaults to the locally saved
                 token, which is the recommended method for authentication (see
@@ -3434,11 +3436,17 @@ class HfApi:
             'datalab-to/chandra-ocr-2'
             >>> leaderboard[0].rank
             1
+
+            # Include fine-tuned / derivative models too
+            >>> full_leaderboard = api.get_dataset_leaderboard("allenai/olmOCR-bench", base_model_only=False)
             ```
         """
         headers = self._build_hf_headers(token=token)
         path = f"{self.endpoint}/api/datasets/{repo_id}/leaderboard"
-        r = get_session().get(path, headers=headers, timeout=timeout)
+        params = {}
+        if base_model_only is not None:
+            params["base_model"] = base_model_only
+        r = get_session().get(path, headers=headers, params=params, timeout=timeout)
         hf_raise_for_status(r)
         data = r.json()
         return [DatasetLeaderboardEntry(**entry) for entry in data]
@@ -4678,7 +4686,6 @@ class HfApi:
 
         headers = self._build_hf_headers(token=token)
         r = get_session().request("DELETE", path, headers=headers, json=json)
-        reset_xet_connection_info_cache_for_repo(repo_type, repo_id)
         try:
             hf_raise_for_status(r)
         except RepositoryNotFoundError:
@@ -11763,7 +11770,7 @@ class HfApi:
                 Defaults to `"cpu-basic"`.
 
             timeout (`Union[int, float, str]`, *optional*):
-                Max duration for the Job: int/float with s (seconds, default), m (minutes), h (hours) or d (days).
+                Max duration for the Job: int with s (seconds, default), m (minutes), h (hours) or d (days).
                 Example: `300` or `"5m"` for 5 minutes.
 
             labels (`dict[str, str]`, *optional*):
@@ -12396,7 +12403,7 @@ class HfApi:
                 Defaults to `"cpu-basic"`.
 
             timeout (`Union[int, float, str]`, *optional*):
-                Max duration for the Job: int/float with s (seconds, default), m (minutes), h (hours) or d (days).
+                Max duration for the Job: int with s (seconds, default), m (minutes), h (hours) or d (days).
                 Example: `300` or `"5m"` for 5 minutes.
 
             labels (`dict[str, str]`, *optional*):
@@ -12550,7 +12557,7 @@ class HfApi:
                 Defaults to `"cpu-basic"`.
 
             timeout (`Union[int, float, str]`, *optional*):
-                Max duration for the Job: int/float with s (seconds, default), m (minutes), h (hours) or d (days).
+                Max duration for the Job: int with s (seconds, default), m (minutes), h (hours) or d (days).
                 Example: `300` or `"5m"` for 5 minutes.
 
             labels (`dict[str, str]`, *optional*):
@@ -12939,7 +12946,7 @@ class HfApi:
                 Defaults to `"cpu-basic"`.
 
             timeout (`Union[int, float, str]`, *optional*):
-                Max duration for the Job: int/float with s (seconds, default), m (minutes), h (hours) or d (days).
+                Max duration for the Job: int with s (seconds, default), m (minutes), h (hours) or d (days).
                 Example: `300` or `"5m"` for 5 minutes.
 
             labels (`dict[str, str]`, *optional*):
@@ -13474,7 +13481,6 @@ class HfApi:
             headers=self._build_hf_headers(token=token),
         )
 
-        reset_xet_connection_info_cache_for_repo("bucket", bucket_id)
         try:
             hf_raise_for_status(response)
         except HfHubHTTPError as e:

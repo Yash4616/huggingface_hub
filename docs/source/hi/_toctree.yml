@@ -13,3 +13,7 @@
       title: उपयोग मार्गदर्शिकाएँ
     - local: guides/upload
       title: फ़ाइलें अपलोड करें
+    - local: guides/repository
+      title: रिपॉजिटरी
+    - local: guides/search
+      title: खोज
